@@ -1,0 +1,27 @@
+Запотевшие стёкла зимой: что делать
+Vertical reel, 1080×1920, 24 fps, hologram-hud style.
+
+Picture
+  Drawn in the project: wireframe hologram engine and HUD layer from the
+  hologram-hud style of the local film library (copied into engine/), models
+  built in code (generic sedan, driver, HVAC unit). No stock footage, no brands.
+  Type: Exo 2 and JetBrains Mono, SIL Open Font License 1.1.
+    https://github.com/googlefonts/Exo-2.0  https://github.com/JetBrains/JetBrainsMono
+
+Voice
+  Russian narration, voice Kore, Gemini gemini-2.5-flash-preview-tts.
+  Pad, HUD sounds, blower noise and droplets are synthesized; no music library.
+
+Facts used
+  A resting adult exhales roughly 15 g of water per hour (about a tablespoon);
+  the real figure varies with activity and air humidity.
+  Saturation vapour density from the Magnus formula:
+    about 17.3 g/m³ at +20 °C and about 4.8 g/m³ at 0 °C.
+  At +20 °C and 50 % relative humidity the dew point is about +9 °C.
+  Outdoor air at −12 °C, heated to +20 °C without adding water, ends up near 10 % RH
+  (assumes the outside air is close to saturated).
+  The AC evaporator is colder than the dew point, so water condenses on it and
+  drains outside; the heater core then warms the already dried air.
+  In hard frost many compressors are locked out and do not run; fresh outside
+  air then does most of the drying.
+  The on-screen glass warm-up to +12 °C is an illustration, not a measurement.

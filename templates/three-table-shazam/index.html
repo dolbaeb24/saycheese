@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Как Shazam слышит песню в шуме</title>
+<style>
+  html,body{margin:0;background:#090807;overflow:hidden;height:100%}
+  canvas{position:fixed;inset:0;width:100%;height:100%}
+  .cap{position:fixed;left:56px;right:56px;z-index:2;font-family:Manrope,sans-serif;color:#f4f1ea;text-align:center;text-wrap:balance}
+  #top{top:88px;font-weight:760;font-size:42px;line-height:1.15;letter-spacing:-0.03em}
+  #bot{bottom:120px;font-weight:720;font-size:38px;line-height:1.2}
+  em{font-style:normal;color:#ffb020}
+  .pill{display:inline;background:rgba(12,10,8,0.74);padding:6px 20px;border-radius:18px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
+  .src{font-size:26px;font-weight:600;color:#bdb4a6;letter-spacing:0}
+</style>
+</head>
+<body>
+<div id="top" class="cap"></div>
+<div id="bot" class="cap"></div>
+<script type="module">
+import * as THREE from '/node_modules/three/build/three.module.js';
+
+/* Section starts = sentence starts in the voice (voice/words.json, chunks at 0.30 / 15.45 / 36.50 / 52.60). */
+const T = { cafe: 0, cafe2: 3.85, map: 6.75, noise: 15.35, stars: 22.7, key: 27.85, search: 36.4, search2: 42.7, line: 46.2, end: 52.5, dur: 61.0 };
+const DUR = T.dur;
+const LINES = () => [
+  { t0: 0.0, t1: T.cafe2 - 0.05, top: '', bot: 'Shazam узнаёт песню<br>за пару секунд.' },
+  { t0: T.cafe2, t1: T.map - 0.1, top: '', bot: 'Он ищет <em>звёзды</em>.' },
+  { t0: T.map + 0.1, t1: T.noise - 0.1, top: 'Время × частота', bot: 'Звук — это <em>карта</em>.' },
+  { t0: T.noise + 0.1, t1: T.stars - 0.1, top: '', bot: 'Шум — мелкий. Пики — <em>громкие</em>.' },
+  { t0: T.stars + 0.1, t1: T.key - 0.1, top: '', bot: 'Остались только <em>звёзды</em>.' },
+  { t0: T.key + 0.1, t1: T.search - 0.1, top: '', bot: 'Пара звёзд — <em>ключ</em>.' },
+  { t0: T.search + 0.1, t1: T.search2, top: 'Сотни ключей. Миллионы песен.', bot: '' },
+  { t0: T.search2, t1: T.line - 0.1, top: 'Сотни ключей. Миллионы песен.', bot: 'Совпадений <em>много</em>.' },
+  { t0: T.line + 0.1, t1: T.end - 0.1, top: '', bot: 'Шум — вразброс.<br>Песня — <em>в линию</em>.' },
+  { t0: T.end + 0.1, t1: T.dur, top: '<span class="src">По статье Эвери Вана, 2003</span>', bot: 'Найдена по <em>звёздам</em>.' },
+];
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(1);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.setClearColor(0x090807, 1);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x090807, 0.035);
+const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 220);
+scene.add(new THREE.AmbientLight(0xfff2dd, 0.58));
+const keyL = new THREE.DirectionalLight(0xffe2b0, 2.3);
+keyL.position.set(-4, 8, 6);
+scene.add(keyL);
+scene.add(new THREE.DirectionalLight(0x8aa0c8, 0.4).translateX(6));
+const glow = new THREE.PointLight(0xffa030, 0, 9);
+scene.add(glow);
+const floorMat = new THREE.MeshStandardMaterial({ color: 0x14110e, roughness: 0.94 });
+const floor = new THREE.Mesh(new THREE.CircleGeometry(48, 48), floorMat);
+floor.rotation.x = -Math.PI / 2;
+scene.add(floor);
+function blob(x, y, z, s) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(s, 12, 8), new THREE.MeshBasicMaterial({ color: 0xc4884a, transparent: true, opacity: 0.07 }));
+  m.position.set(x, y, z); scene.add(m);
+}
+blob(-3.2, 3.4, -7, 1.3); blob(2.6, 2.6, -9, 1.6); blob(4.2, 4.2, -6, 1.1);
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+function ss(t) { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); }
+function seg(t, a, b) { return ss((t - a) / Math.max(0.001, b - a)); }
+function rnd(i) { const x = Math.sin(i * 12.9898 + 78.233) * 43758.5453; return x - Math.floor(x); }
+
+const root = new THREE.Group();
+scene.add(root);
+function wipe() { while (root.children.length) root.remove(root.children[0]); }
+function put(obj, x, y, z, s = 1) { obj.position.set(x, y, z); obj.scale.setScalar(s); root.add(obj); return obj; }
+
+const texCache = {};
+function canvasTex(key, w, h, draw) {
+  if (texCache[key]) return texCache[key];
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  texCache[key] = t;
+  return t;
+}
+const spriteMats = {};
+function label(text, x, y, z, h, opacity = 1, color = '#f4f1ea', weight = 700, bg = null) {
+  const lines = text.split('\n');
+  const key = text + color + weight + bg;
+  if (!spriteMats[key]) {
+    const fs = 72, lh = 86;
+    const probe = document.createElement('canvas').getContext('2d');
+    probe.font = `${weight} ${fs}px Manrope, sans-serif`;
+    const w = Math.ceil(Math.max(...lines.map(l => probe.measureText(l).width)) + 40);
+    const hh = lines.length * lh + 20;
+    const tex = canvasTex('L' + key, w, hh, (g) => {
+      if (bg) {
+        g.fillStyle = bg;
+        g.beginPath(); g.roundRect(4, 4, w - 8, hh - 8, 28); g.fill();
+      }
+      g.font = `${weight} ${fs}px Manrope, sans-serif`;
+      g.fillStyle = color; g.textAlign = 'center'; g.textBaseline = 'middle';
+      lines.forEach((l, i) => g.fillText(l, w / 2, 10 + lh * (i + 0.5)));
+    });
+    spriteMats[key] = { mat: new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, depthTest: false }), aspect: w / hh, lines: lines.length };
+  }
+  const S = spriteMats[key];
+  S.mat.opacity = opacity;
+  const sp = new THREE.Sprite(S.mat);
+  sp.position.set(x, y, z);
+  sp.scale.set(h * S.lines * S.aspect, h * S.lines, 1);
+  root.add(sp);
+  return sp;
+}
+const haloTex = canvasTex('halo', 128, 128, (g) => {
+  const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0, 'rgba(255,200,120,1)');
+  gr.addColorStop(0.25, 'rgba(255,160,60,0.55)');
+  gr.addColorStop(1, 'rgba(255,140,40,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+});
+const haloWarm = new THREE.SpriteMaterial({ map: haloTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+const haloGrey = new THREE.SpriteMaterial({ map: haloTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, color: 0x8c8c8c });
+function halo(x, y, z, s, grey = false) {
+  const sp = new THREE.Sprite(grey ? haloGrey : haloWarm);
+  sp.position.set(x, y, z); sp.scale.set(s, s, 1); root.add(sp);
+}
+
+function look(px, py, pz, lx, ly, lz) {
+  camera.position.set(px, py, pz);
+  camera.up.set(0, 1, 0);
+  camera.lookAt(lx, ly, lz);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+}
+function cam(keys, t) {
+  let a = keys[0], b = keys[keys.length - 1];
+  if (t <= keys[0].t) b = a;
+  for (let i = 0; i < keys.length - 1; i++) if (t >= keys[i].t && t <= keys[i + 1].t) { a = keys[i]; b = keys[i + 1]; break; }
+  if (t >= keys[keys.length - 1].t) a = b;
+  const u = ss((t - a.t) / Math.max(0.001, b.t - a.t));
+  const wob = Math.sin(t * 0.7) * 0.02;
+  look(lerp(a.px, b.px, u) + wob, lerp(a.py, b.py, u), lerp(a.pz, b.pz, u), lerp(a.lx, b.lx, u), lerp(a.ly, b.ly, u), lerp(a.lz, b.lz, u));
+}
+
+const ev = [];
+function mark(t, type) { ev.push({ t: +t.toFixed(2), type }); }
+
+const M4 = new THREE.Matrix4(), Q0 = new THREE.Quaternion(), V = new THREE.Vector3(), SC = new THREE.Vector3();
+const COL = new THREE.Color();
+
+/* ---------- cafe ---------- */
+const dotGeo = new THREE.SphereGeometry(0.042, 10, 8);
+const dots = new THREE.InstancedMesh(dotGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }), 420);
+for (let i = 0; i < 420; i++) dots.setColorAt(i, COL.set(0xffffff));
+scene.add(dots);
+const phoneMat = new THREE.MeshStandardMaterial({ color: 0x1d1b1e, roughness: 0.32, metalness: 0.2 });
+const phoneGeo = new THREE.BoxGeometry(0.95, 0.08, 1.85);
+const screenGeo = new THREE.PlaneGeometry(0.84, 1.7);
+const screenMat = new THREE.MeshBasicMaterial({
+  map: canvasTex('screen', 256, 518, (g, w, h) => {
+    g.fillStyle = '#16130f'; g.fillRect(0, 0, w, h);
+    g.strokeStyle = '#ffa53a';
+    [34, 58, 82].forEach((r, i) => { g.globalAlpha = 1 - i * 0.28; g.lineWidth = 7; g.beginPath(); g.arc(w / 2, h * 0.42, r, 0, Math.PI * 2); g.stroke(); });
+    g.globalAlpha = 1; g.fillStyle = '#ffa53a'; g.beginPath(); g.arc(w / 2, h * 0.42, 16, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#e9e1d2'; g.font = '700 34px Manrope, sans-serif'; g.textAlign = 'center';
+    g.fillText('слушаю…', w / 2, h * 0.72);
+  }),
+});
+const ringGeo = new THREE.RingGeometry(0.2, 0.225, 48);
+const ringMat = new THREE.MeshBasicMaterial({ color: 0xffa53a, transparent: true, side: THREE.DoubleSide, depthWrite: false });
+const SRC = [
+  { x: -1.6, z: -2.0, song: false, label: 'голоса' },
+  { x: 1.6, z: -1.2, song: false, label: 'посуда' },
+  { x: -1.55, z: 2.1, song: false, label: 'голоса' },
+  { x: 1.55, z: 2.3, song: false, label: 'смех' },
+  { x: 0.15, z: -3.1, song: true, label: 'песня' },
+];
+function cafe(t) {
+  floorMat.color.set(0x1e1712);
+  cam([
+    { t: 0, px: 0, py: 9.0, pz: 7.0, lx: 0, ly: 0, lz: -0.1 },
+    { t: T.map, px: 0, py: 8.0, pz: 6.0, lx: 0, ly: 0, lz: -0.15 },
+  ], t);
+  const phone = new THREE.Mesh(phoneGeo, phoneMat);
+  put(phone, 0, 0.04, 0.1);
+  const scr = new THREE.Mesh(screenGeo, screenMat);
+  scr.rotation.x = -Math.PI / 2;
+  put(scr, 0, 0.083, 0.1);
+  for (let k = 0; k < 2; k++) {
+    const ph = ((t * 0.7 + k * 0.5) % 1);
+    const r = new THREE.Mesh(ringGeo, ringMat);
+    r.rotation.x = -Math.PI / 2;
+    put(r, 0, 0.09, 0.1 - 0.85 * 0.42 + 0.35, 1 + ph * 3.2);
+    ringMat.opacity = 0.5;
+  }
+  const PH = { x: 0, z: 0.1 };
+  const N = 76;
+  let n = 0;
+  dots.visible = true;
+  SRC.forEach((S, idx) => {
+    const grow = seg(t, 0.15 + idx * 0.12, 1.7 + idx * 0.12);
+    const dx = PH.x - S.x, dz = PH.z - S.z, L = Math.hypot(dx, dz);
+    const ux = dx / L, uz = dz / L, px = -uz, pz = ux;
+    for (let k = 0; k < N; k++) {
+      const s = k / N;
+      if (s > grow) break;
+      let off;
+      if (S.song) off = 0.2 * Math.sin(s * 17 - t * 6);
+      else off = 0.2 * (Math.sin(s * 23 + t * 7 + idx * 3) * 0.45 + Math.sin(s * 47 - t * 11 + idx) * 0.3 + (rnd(idx * 1000 + k * 13 + Math.floor(t * 12) * 7) - 0.5) * 0.9);
+      const taper = Math.min(1, (1 - s) * 3.2);
+      const x = S.x + dx * s + px * off * taper;
+      const z = S.z + dz * s + pz * off * taper;
+      const y = 0.42 + (S.song ? 0.06 : 0);
+      const sc = (S.song ? 1.25 : 0.85) * Math.min(1, (1 - s) * 5);
+      M4.compose(V.set(x, y, z), Q0, SC.set(sc, sc, sc));
+      dots.setMatrixAt(n, M4);
+      dots.setColorAt(n, COL.set(S.song ? 0xffa53a : 0x7d776f));
+      n++;
+    }
+    const lo = seg(t, 0.9 + idx * 0.12, 1.6 + idx * 0.12);
+    const ls = S.song ? 0.12 : 0.22;
+    if (lo > 0) label(S.label, S.x + dx * ls + (S.song ? 0.55 : 0), 0.95, S.z + dz * ls, 0.3, lo, S.song ? '#ffb64a' : '#bdb4a6');
+  });
+  dots.count = n;
+  dots.instanceMatrix.needsUpdate = true;
+  dots.instanceColor.needsUpdate = true;
+}
+
+/* ---------- spectrogram map ---------- */
+const NX = 12, NZ = 12, CELL = 0.3;
+const PEAKS = [[0, 3], [1, 8], [2, 5], [3, 10], [4, 2], [5, 7], [6, 4], [7, 9], [8, 6], [9, 1], [10, 8], [11, 4]];
+const peakH = PEAKS.map((_, i) => 1.15 + rnd(i + 50) * 0.55);
+const isPeak = (i, j) => PEAKS[i][1] === j;
+const cellX = (i) => -1.65 + i * CELL;
+const cellZ = (j) => 1.65 - j * CELL;
+const noiseH = (i, j) => 0.06 + Math.pow(rnd(i * 31 + j * 7 + 3), 1.6) * 0.55;
+const NOISE_STARS = (() => {
+  const all = [];
+  for (let i = 0; i < NX; i++) for (let j = 0; j < NZ; j++) if (!isPeak(i, j)) all.push([noiseH(i, j), i, j]);
+  return all.sort((a, b) => b[0] - a[0]).slice(0, 4).map(a => [a[1], a[2]]);
+})();
+const barGeo = new THREE.BoxGeometry(0.22, 1, 0.22).translate(0, 0.5, 0);
+const noiseMat = new THREE.MeshStandardMaterial({ color: 0xe7e1d4, roughness: 0.55 });
+const peakMat = new THREE.MeshStandardMaterial({ color: 0xe7e1d4, roughness: 0.42, emissive: 0xff9a1f, emissiveIntensity: 0 });
+const noiseBars = new THREE.InstancedMesh(barGeo, noiseMat, NX * NZ);
+const peakBars = new THREE.InstancedMesh(barGeo, peakMat, NX);
+scene.add(noiseBars, peakBars);
+const starGeo = new THREE.SphereGeometry(0.085, 14, 10);
+const starWarm = new THREE.MeshBasicMaterial({ color: 0xffc070 });
+const starGrey = new THREE.MeshBasicMaterial({ color: 0x9a948c });
+const lineGeo = new THREE.CylinderGeometry(0.022, 0.022, 1, 8).translate(0, 0.5, 0);
+const lineGold = new THREE.MeshBasicMaterial({ color: 0xffb020 });
+const lineFaint = new THREE.MeshBasicMaterial({ color: 0xffb020, transparent: true, opacity: 0.4 });
+const UP = new THREE.Vector3(0, 1, 0);
+function beam(a, b, grow, mat) {
+  const d = new THREE.Vector3().subVectors(b, a);
+  const len = d.length();
+  if (grow <= 0.001) return;
+  const m = new THREE.Mesh(lineGeo, mat);
+  m.quaternion.setFromUnitVectors(UP, d.normalize());
+  m.position.copy(a);
+  m.scale.set(1, len * grow, 1);
+  root.add(m);
+}
+const axisGeo = new THREE.CylinderGeometry(0.015, 0.015, 1, 6).translate(0, 0.5, 0);
+const axisMat = new THREE.MeshBasicMaterial({ color: 0x8a8278, transparent: true });
+function axis(a, b, op) {
+  axisMat.opacity = op;
+  const d = new THREE.Vector3().subVectors(b, a);
+  const m = new THREE.Mesh(axisGeo, axisMat);
+  m.quaternion.setFromUnitVectors(UP, d.clone().normalize());
+  m.position.copy(a); m.scale.set(1, d.length(), 1);
+  root.add(m);
+}
+const STAR_Y = 0.09;
+const starPos = (i) => new THREE.Vector3(cellX(i), STAR_Y, cellZ(PEAKS[i][1]));
+const KA = 4, KB = 6;
+function mapScene(t) {
+  floorMat.color.set(0x14110e);
+  const MA = starPos(KA), MB = starPos(KB);
+  const Mx = (MA.x + MB.x) / 2, Mz = (MA.z + MB.z) / 2;
+  cam([
+    { t: T.map, px: 0, py: 7.0, pz: 11.8, lx: 0, ly: 0.2, lz: 0.2 },
+    { t: T.noise, px: 0.2, py: 6.6, pz: 11.0, lx: 0, ly: 0.35, lz: 0 },
+    { t: T.noise + 2, px: 0.3, py: 5.8, pz: 10.2, lx: 0, ly: 0.5, lz: 0 },
+    { t: T.stars, px: 0.3, py: 5.9, pz: 10.2, lx: 0, ly: 0.45, lz: 0 },
+    { t: T.stars + 2, px: 0, py: 10.8, pz: 4.9, lx: 0, ly: 0, lz: 0 },
+    { t: T.key + 0.3, px: 0, py: 10.6, pz: 4.7, lx: 0, ly: 0, lz: 0 },
+    { t: T.key + 2.2, px: Mx, py: 4.2, pz: Mz + 3.6, lx: Mx, ly: 0.45, lz: Mz },
+    { t: T.key + 5.8, px: Mx, py: 4.1, pz: Mz + 3.4, lx: Mx, ly: 0.45, lz: Mz },
+    { t: T.search, px: 0, py: 9.0, pz: 7.0, lx: 0, ly: 0, lz: 0 },
+  ], t);
+  const noiseAmt = lerp(0.42, 1, seg(t, T.noise, T.noise + 1.6));
+  const sink = seg(t, T.stars, T.stars + 1.3);
+  const grey = seg(t, T.noise, T.noise + 1.0);
+  noiseMat.color.setRGB(lerp(0.906, 0.42, grey), lerp(0.882, 0.405, grey), lerp(0.831, 0.39, grey));
+  peakMat.emissiveIntensity = 0.85 * seg(t, T.noise + 0.3, T.noise + 1.3);
+  peakMat.color.setRGB(1, lerp(0.88, 0.8, grey), lerp(0.83, 0.55, grey));
+  const rise = (i) => seg(t, T.map + 0.5 + i * 0.32, T.map + 0.95 + i * 0.32);
+  let n = 0;
+  if (sink < 1) {
+    for (let i = 0; i < NX; i++) for (let j = 0; j < NZ; j++) {
+      const h = isPeak(i, j) ? 0.001 : noiseH(i, j) * noiseAmt * rise(i) * (1 - sink) + 0.001;
+      M4.compose(V.set(cellX(i), 0, cellZ(j)), Q0, SC.set(1, h, 1));
+      noiseBars.setMatrixAt(n++, M4);
+    }
+    for (let i = 0; i < NX; i++) {
+      const h = peakH[i] * rise(i) * (1 - sink) + 0.001;
+      M4.compose(V.set(cellX(i), 0, cellZ(PEAKS[i][1])), Q0, SC.set(1.05, h, 1.05));
+      peakBars.setMatrixAt(i, M4);
+    }
+    noiseBars.visible = peakBars.visible = true;
+    noiseBars.instanceMatrix.needsUpdate = peakBars.instanceMatrix.needsUpdate = true;
+  }
+  const axOp = 1 - seg(t, T.key, T.key + 0.8);
+  if (axOp > 0.01) {
+    const a = seg(t, T.map + 0.2, T.map + 1.0) * axOp;
+    axis(new THREE.Vector3(-1.9, 0.02, 1.95), new THREE.Vector3(1.95, 0.02, 1.95), a);
+    axis(new THREE.Vector3(-1.9, 0.02, 1.95), new THREE.Vector3(-1.9, 0.02, -1.95), a);
+    label('время →', 1.15, 0.12, 2.35, 0.26, a, '#d8cfbf', 700, 'rgba(20,16,12,0.8)');
+    label('частота ↑', -1.9, 0.75, -2.15, 0.26, a, '#d8cfbf', 700, 'rgba(20,16,12,0.8)');
+  }
+  const lab = seg(t, T.noise + 1.4, T.noise + 2.0) * (1 - seg(t, T.stars - 0.4, T.stars));
+  if (lab > 0.01) {
+    label('шум', 1.2, 0.95, 1.6, 0.3, lab, '#d8cfbf', 700, 'rgba(20,16,12,0.8)');
+    label('пик', cellX(3), peakH[3] + 0.35, cellZ(PEAKS[3][1]), 0.3, lab, '#ffb64a', 700, 'rgba(20,16,12,0.8)');
+  }
+  const st = seg(t, T.stars + 0.55, T.stars + 1.35);
+  if (st > 0) {
+    for (let i = 0; i < NX; i++) {
+      const p = starPos(i);
+      const m = new THREE.Mesh(starGeo, starWarm);
+      put(m, p.x, p.y, p.z, st);
+      halo(p.x, p.y + 0.02, p.z, 0.62 * st);
+    }
+    NOISE_STARS.forEach(([i, j]) => {
+      const m = new THREE.Mesh(starGeo, starGrey);
+      put(m, cellX(i), STAR_Y, cellZ(j), 0.75 * st);
+      halo(cellX(i), STAR_Y + 0.02, cellZ(j), 0.38 * st, true);
+    });
+  }
+  if (t >= T.key) {
+    beam(MA, MB, seg(t, T.key + 2.4, T.key + 3.2), lineGold);
+    const tg = seg(t, T.key + 3.5, T.key + 4.0);
+    if (tg > 0) label('частота 1 · частота 2\nпромежуток', Mx - 0.05, 0.95, Mz - 0.2, 0.1, tg, '#ffd48a', 700, 'rgba(20,16,12,0.82)');
+    const more = seg(t, T.key + 5.9, T.key + 8.0);
+    if (more > 0) {
+      for (let i = 0; i < NX - 1; i++) for (const d of [1, 2]) {
+        if (i + d >= NX || (i === KA && i + d === KB)) continue;
+        const g0 = clamp(more * 3 - (i * 0.15 + d * 0.3), 0, 1);
+        beam(starPos(i), starPos(i + d), ss(g0), lineFaint);
+      }
+    }
+  }
+}
+
+/* ---------- library wall ---------- */
+const boxGeo = new THREE.BoxGeometry(1, 1.35, 0.72);
+const faceGeo = new THREE.PlaneGeometry(0.92, 1.2);
+const plain = new THREE.MeshStandardMaterial({ color: 0xe7e1d4, roughness: 0.48 });
+const hot = new THREE.MeshStandardMaterial({ color: 0xffe2a8, roughness: 0.42, emissive: 0xff9a1f, emissiveIntensity: 0.55 });
+const faceMats = {};
+function textFace(text, isHot, size) {
+  const k = text + (isHot ? '!' : '') + size;
+  if (!faceMats[k]) faceMats[k] = new THREE.MeshBasicMaterial({
+    map: canvasTex('F' + k, 460, 600, (g, w, h) => {
+      g.fillStyle = isHot ? '#ffe2a8' : '#e7e1d4'; g.fillRect(0, 0, w, h);
+      g.fillStyle = '#1c1814'; g.font = `700 ${size}px Manrope, sans-serif`;
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      text.split('\n').forEach((l, i, a) => g.fillText(l, w / 2, h / 2 + (i - (a.length - 1) / 2) * size * 1.2));
+    }),
+  });
+  return faceMats[k];
+}
+function box(faceMat, isHot) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(boxGeo, isHot ? hot : plain);
+  body.position.y = 0.675;
+  const face = new THREE.Mesh(faceGeo, faceMat);
+  face.position.set(0, 0.7, 0.37);
+  g.add(body, face);
+  return g;
+}
+const songNo = (k) => {
+  const n = Math.floor(rnd(k + 900) * 9e6) + 100000;
+  return '♪\n№ ' + String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+};
+const WALL_C = 4, WALL_R = 5;
+const LIT = [13, 2, 7, 18, 9, 0, 15, 5, 11, 16, 6, 19];
+const litTime = (i) => T.search + 1.2 + i * (T.line - T.search - 2.2) / LIT.length;
+const keyGeo = new THREE.BoxGeometry(0.24, 0.13, 0.04);
+const keyMat = new THREE.MeshBasicMaterial({ color: 0xffb020 });
+function wall(t) {
+  floorMat.color.set(0x14110e);
+  cam([
+    { t: T.search, px: 0, py: 2.9, pz: 12.2, lx: 0, ly: 2.8, lz: 0 },
+    { t: T.line, px: 0, py: 2.9, pz: 11.2, lx: 0, ly: 2.8, lz: 0 },
+  ], t);
+  const litAt = {};
+  LIT.forEach((k, i) => { litAt[k] = litTime(i); });
+  for (let r = 0; r < WALL_R; r++) for (let c = 0; c < WALL_C; c++) {
+    const k = r * WALL_C + c;
+    const x = -1.5 + c * 1.0, y = r * 1.12;
+    const on = litAt[k] !== undefined && t >= litAt[k];
+    put(box(textFace(songNo(k), on, 74), on), x, y, 0, 0.8);
+    if (litAt[k] !== undefined) {
+      const a = litAt[k];
+      const u = seg(t, a - 1.1, a);
+      if (t > a - 1.1 && t < a) {
+        const tx = x, ty = y + 0.56, tz = 0.4;
+        const side = k % 2 ? 1 : -1;
+        const kx = lerp(side * 2.6, tx, u), ky = lerp(3.4, ty, u) + Math.sin(u * Math.PI) * 0.5, kz = lerp(5.5, tz, u);
+        const m = new THREE.Mesh(keyGeo, keyMat);
+        m.rotation.z = u * 3;
+        put(m, kx, ky, kz);
+        halo(kx, ky, kz, 0.45);
+      }
+    }
+  }
+}
+
+/* ---------- alignment ---------- */
+const PLOT = [
+  { name: '№ 18 204', pts: Array.from({ length: 8 }, (_, i) => [rnd(i * 3 + 1), rnd(i * 3 + 2)]) },
+  { name: '№ 3 771 950', pts: Array.from({ length: 8 }, (_, i) => [rnd(i * 5 + 40), rnd(i * 5 + 41)]) },
+  { name: '№ 912 006', pts: Array.from({ length: 8 }, (_, i) => [rnd(i * 7 + 90), rnd(i * 7 + 91)]) },
+  { name: '№ 5 208 117', gold: true, pts: [
+    ...Array.from({ length: 9 }, (_, i) => [0.08 + i * 0.105, 0.1 + i * 0.1 + (rnd(i + 300) - 0.5) * 0.03]),
+    [rnd(410), rnd(411)], [rnd(412), rnd(413)],
+  ] },
+];
+const ORDER = [[0, 1, 2, 3, 4, 5, 6, 7], [0, 1, 2, 3, 4, 5, 6, 7], [0, 1, 2, 3, 4, 5, 6, 7], [0, 9, 1, 2, 3, 10, 4, 5, 6, 7, 8]];
+function plotFace(b, n, done) {
+  const P = PLOT[b];
+  const k = 'P' + b + '_' + n + (done ? 'd' : '');
+  if (!faceMats[k]) faceMats[k] = new THREE.MeshBasicMaterial({
+    map: canvasTex(k, 460, 600, (g, w, h) => {
+      g.fillStyle = P.gold && done ? '#ffe2a8' : '#e7e1d4'; g.fillRect(0, 0, w, h);
+      const x0 = 56, x1 = 420, y0 = 470, y1 = 70;
+      g.strokeStyle = '#8a8278'; g.lineWidth = 5;
+      g.beginPath(); g.moveTo(x0, y1); g.lineTo(x0, y0); g.lineTo(x1, y0); g.stroke();
+      if (P.gold && done) {
+        g.strokeStyle = 'rgba(214,110,20,0.55)'; g.lineWidth = 16; g.lineCap = 'round';
+        g.beginPath(); g.moveTo(x0 + 0.04 * (x1 - x0), y0 - 0.06 * (y0 - y1)); g.lineTo(x0 + 0.98 * (x1 - x0), y0 - 0.96 * (y0 - y1)); g.stroke();
+      }
+      ORDER[b].slice(0, n).forEach((pi) => {
+        const p = P.pts[pi];
+        g.fillStyle = P.gold ? '#a8460c' : '#1c1814';
+        g.beginPath(); g.arc(x0 + 18 + p[0] * (x1 - x0 - 30), y0 - 18 - p[1] * (y0 - y1 - 30), 15, 0, Math.PI * 2); g.fill();
+      });
+      g.fillStyle = '#1c1814'; g.font = '700 44px Manrope, sans-serif'; g.textAlign = 'center';
+      g.fillText(P.name, w / 2, 545);
+    }),
+  });
+  return faceMats[k];
+}
+const GRID = [{ x: -0.72, y: 0 }, { x: 0.72, y: 0 }, { x: -0.72, y: 1.755 }, { x: 0.72, y: 1.755 }];
+const cubeGeo = new THREE.BoxGeometry(0.26, 0.26, 0.26);
+const cubeMat = new THREE.MeshStandardMaterial({ color: 0xffd27a, emissive: 0xff9a1f, emissiveIntensity: 0.8, roughness: 0.4 });
+const TOWER = 6;
+function align(t) {
+  floorMat.color.set(0x14110e);
+  cam([
+    { t: T.line, px: 0, py: 1.9, pz: 9.7, lx: 0, ly: 1.75, lz: 0 },
+    { t: T.end, px: 0.1, py: 1.95, pz: 9.1, lx: 0.05, ly: 1.8, lz: 0 },
+    { t: T.end + 2.6, px: 0.72, py: 3.6, pz: 8.8, lx: 0.72, ly: 3.6, lz: 0 },
+    { t: T.dur, px: 0.72, py: 3.6, pz: 8.4, lx: 0.72, ly: 3.6, lz: 0 },
+  ], t);
+  const prog = clamp((t - (T.line + 0.4)) / 3.8, 0, 1);
+  const done = t >= T.line + 4.6;
+  GRID.forEach((G, b) => {
+    const n = Math.round(prog * ORDER[b].length);
+    const gold = PLOT[b].gold && done;
+    put(box(plotFace(b, n, PLOT[b].gold && done), gold), G.x, G.y, 0, 1.3);
+  });
+  if (done) { glow.position.set(0.72, 2.8, 1.8); glow.intensity = 5; }
+  if (t >= T.end) {
+    const topY = 1.755 * 2;
+    for (let k = 0; k < TOWER; k++) {
+      const a = T.end + 0.3 + k * 0.25;
+      const u = seg(t, a, a + 0.22);
+      if (u <= 0) continue;
+      const m = new THREE.Mesh(cubeGeo, cubeMat);
+      put(m, 0.72, topY + 0.13 + k * 0.28 + (1 - u) * 0.5, 0, u);
+    }
+    const ttl = seg(t, T.end + 3.0, T.end + 3.6);
+    if (ttl > 0) label('«Летний свет»', 0.72, topY + TOWER * 0.28 + 0.4, 0, 0.3, ttl, '#ffd48a');
+    glow.position.set(0.72, 4.4, 1.6); glow.intensity = 7;
+  }
+}
+
+function captions(t) {
+  let line = null;
+  for (const L of LINES()) if (t >= L.t0 && t < L.t1) line = L;
+  const top = document.getElementById('top'), bot = document.getElementById('bot');
+  if (!line) { top.innerHTML = ''; bot.innerHTML = ''; return; }
+  const inn = line.t0 <= 0.02 ? 1 : clamp((t - line.t0) / 0.16, 0, 1);
+  const a = Math.min(inn, clamp((line.t1 - t) / 0.18, 0, 1));
+  top.style.opacity = a; bot.style.opacity = a;
+  const pill = (s) => s ? `<span class="pill">${s}</span>` : '';
+  top.innerHTML = pill(line.top); bot.innerHTML = pill(line.bot);
+}
+
+function render(t) {
+  renderer.setSize(innerWidth, innerHeight, false);
+  wipe();
+  glow.intensity = 0;
+  dots.visible = noiseBars.visible = peakBars.visible = false;
+  if (t < T.map) cafe(t);
+  else if (t < T.search) mapScene(t);
+  else if (t < T.line) wall(t);
+  else align(t);
+  captions(t);
+  renderer.render(scene, camera);
+}
+
+const face = new FontFace('Manrope', 'url(/@film/fonts/Manrope.ttf)');
+face.load().then(f => {
+  document.fonts.add(f);
+  for (let i = 0; i < NX; i++) mark(T.map + 0.95 + i * 0.32, 'tap');
+  mark(T.stars + 0.6, 'ping');
+  mark(T.key + 2.4, 'whoosh');
+  LIT.forEach((_, i) => mark(litTime(i), 'tick'));
+  mark(T.line + 4.6, 'ping');
+  for (let k = 0; k < TOWER; k++) mark(T.end + 0.3 + k * 0.25, 'tick');
+  mark(T.end + 3.0, 'land');
+  window.EV = ev;
+  window.DUR = DUR;
+  window.render = render;
+  window.READY = true;
+});
+</script>
+</body>
+</html>

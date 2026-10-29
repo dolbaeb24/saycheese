@@ -1,0 +1,18 @@
+Как Shazam узнаёт песню в шуме
+Vertical reel, 1080×1920, 30 fps.
+
+Picture
+  Drawn in the project (Three.js). No stock footage, no Shazam logo.
+  Song titles and catalogue numbers on screen are invented.
+  Type: Manrope, SIL Open Font License 1.1. https://github.com/sharanda/manrope
+
+Voice
+  Russian narration, voice Kore, Gemini gemini-2.5-flash-preview-tts.
+  Bed and object sounds are synthesized; no music library.
+
+Source
+  Avery Li-Chun Wang, "An Industrial-Strength Audio Search Algorithm", ISMIR 2003.
+  Spectrogram peaks (constellation map), pairs of peaks hashed as
+  frequency 1 / frequency 2 / time gap, and matching by a consistent time offset.
+  The film describes the published method; today's Shazam may differ.
+  "Hundreds of keys" and "millions of songs" are orders of magnitude, not figures from the paper.

@@ -1,0 +1,15 @@
+# Сгенерированные материалы конвейера роликов
+deliverables/
+films/
+**/out/
+**/stills/
+**/events.json
+**/build.log
+**/mix.wav
+
+# Окружение и кэши
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+.DS_Store

@@ -1,0 +1,22 @@
+Как работает микроволновка
+Vertical reel, 1080×1920, 24 fps, hologram-hud style.
+
+Picture
+  Drawn in the project: wireframe hologram engine and HUD layer from the
+  hologram-hud style of the local film library (copied into engine/), models
+  built in code (microwave, water molecule, food bowl). No stock footage, no brands.
+  Type: Exo 2 and JetBrains Mono, SIL Open Font License 1.1.
+    https://github.com/googlefonts/Exo-2.0  https://github.com/JetBrains/JetBrainsMono
+
+Voice
+  Russian narration, voice Kore, Gemini gemini-2.5-flash-preview-tts.
+  Pad, HUD sounds, magnetron hum and the final ding are synthesized; no music library.
+
+Facts used
+  Household magnetrons work at 2.45 GHz; wavelength c / f ≈ 12.2 cm.
+  The door mesh holes (about 1–2 mm) are far smaller than the wavelength, so the waves stay inside.
+  Water molecules are electric dipoles; the alternating field keeps turning them,
+  and their collisions with neighbours turn that motion into heat (dielectric heating).
+  Penetration into wet food is roughly 1–2 cm; deeper layers heat by conduction.
+  The turntable moves food through the hot and cold spots of the standing wave.
+  The on-screen 75 °C is an illustration, not a measurement.

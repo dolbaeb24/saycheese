@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Дирихле</title>
+<style>
+  html,body{margin:0;background:#090807;overflow:hidden;height:100%}
+  canvas{position:fixed;inset:0;width:100%;height:100%}
+  .cap{position:fixed;left:56px;right:56px;z-index:2;font-family:Manrope,sans-serif;color:#f4f1ea;text-align:center;text-wrap:balance}
+  #top{top:88px;font-weight:760;font-size:42px;line-height:1.15;letter-spacing:-0.03em}
+  #bot{bottom:120px;font-weight:720;font-size:36px;line-height:1.2}
+  em{font-style:normal;color:#ffb020}
+</style>
+</head>
+<body>
+<div id="top" class="cap"></div>
+<div id="bot" class="cap"></div>
+<script type="module">
+import * as THREE from '/node_modules/three/build/three.module.js';
+
+/* Speech (measured): l1 0.40, l2 5.82, l3 10.45, l4 16.25, l5 19.23,
+   l6 26.45, l7 30.65, l8 38.13, l9 42.27, l10 46.38. Ends 51.03. */
+const DUR = 52.4;
+const A = 0.15, B = 10.20, C = 26.15;
+const LINES = [
+  { t0:0.00, t1:10.35, top:'', bot:'В любом городе-миллионнике<br>есть <em>двое</em> с одним числом волос.' },
+  { t0:10.40, t1:16.15, top:'3 человека. 2 числа.', bot:'Ноль и <em>один</em>.' },
+  { t0:16.20, t1:19.15, top:'', bot:'Третий падает в <em>занятый</em> ящик.' },
+  { t0:19.18, t1:26.05, top:'Людей <em>больше</em>, чем чисел.', bot:'У двоих число одно.' },
+  { t0:26.40, t1:38.05, top:'От нуля до 500 000', bot:'<em>500 001</em> вариант.' },
+  { t0:38.08, t1:46.28, top:'1 000 000 человек. 500 001 ящик.', bot:'Ящики <em>кончились</em>.' },
+  { t0:46.32, t1:52.20, top:'', bot:'Кто они — неизвестно.<br>Что они есть — <em>доказано</em>.' },
+];
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(1);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.setClearColor(0x090807, 1);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x090807, 0.038);
+const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 220);
+scene.add(new THREE.AmbientLight(0xfff2dd, 0.58));
+const keyL = new THREE.DirectionalLight(0xffe2b0, 2.35);
+keyL.position.set(-4, 8, 6);
+scene.add(keyL);
+scene.add(new THREE.DirectionalLight(0x8aa0c8, 0.4).translateX(6));
+const glow = new THREE.PointLight(0xffa030, 0, 9);
+scene.add(glow);
+const floor = new THREE.Mesh(
+  new THREE.CircleGeometry(48, 48),
+  new THREE.MeshStandardMaterial({ color: 0x14110e, roughness: 0.94 })
+);
+floor.rotation.x = -Math.PI / 2;
+scene.add(floor);
+
+const boxGeo = new THREE.BoxGeometry(1, 1.35, 0.72);
+const faceGeo = new THREE.PlaneGeometry(0.92, 1.2);
+const bodyGeo = new THREE.CylinderGeometry(0.16, 0.2, 0.55, 12);
+const headGeo = new THREE.SphereGeometry(0.16, 14, 10);
+const shadeGeo = new THREE.CircleGeometry(0.22, 14);
+const plain = new THREE.MeshStandardMaterial({ color: 0xe7e1d4, roughness: 0.48 });
+const hot = new THREE.MeshStandardMaterial({ color: 0xffe2a8, roughness: 0.42, emissive: 0xff9a1f, emissiveIntensity: 0.55 });
+const skin = new THREE.MeshStandardMaterial({ color: 0xc4784a, roughness: 0.42 });
+const skinB = skin.clone(); skinB.color = new THREE.Color(0xd8a27a);
+const shadeMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.28 });
+const texCache = {};
+const faceMatCache = {};
+function faceMat(text, isHot) {
+  const k = text + (isHot ? '!' : '');
+  if (faceMatCache[k]) return faceMatCache[k];
+  if (!texCache[k]) {
+    const c = document.createElement('canvas');
+    c.width = 512; c.height = 512;
+    const g = c.getContext('2d');
+    g.fillStyle = isHot ? '#ffe2a8' : '#e7e1d4';
+    g.fillRect(0, 0, 512, 512);
+    g.fillStyle = '#1c1814';
+    const size = text.length > 5 ? 78 : text.length > 2 ? 130 : 220;
+    g.font = '700 ' + size + 'px Manrope, sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(text, 256, 268);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    texCache[k] = t;
+  }
+  faceMatCache[k] = new THREE.MeshBasicMaterial({ map: texCache[k] });
+  return faceMatCache[k];
+}
+const root = new THREE.Group();
+scene.add(root);
+function wipe() { while (root.children.length) root.remove(root.children[0]); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+function ss(t) { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); }
+function seg(t, a, b) { return ss((t - a) / Math.max(0.001, b - a)); }
+
+function drawer(label, isHot) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(boxGeo, isHot ? hot : plain);
+  body.position.y = 0.675;
+  const face = new THREE.Mesh(faceGeo, faceMat(label, isHot));
+  face.position.set(0, 0.7, 0.37);
+  g.add(body, face);
+  return g;
+}
+function person() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(bodyGeo, skin); body.position.y = 0.42;
+  const head = new THREE.Mesh(headGeo, skinB); head.position.y = 0.84;
+  g.add(body, head);
+  return g;
+}
+function put(obj, x, y, z, s = 1) {
+  obj.position.set(x, y, z);
+  obj.scale.setScalar(s);
+  root.add(obj);
+  return obj;
+}
+function shadow(x, y, z, s) {
+  const m = new THREE.Mesh(shadeGeo, shadeMat);
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(x, y, z);
+  m.scale.setScalar(s);
+  root.add(m);
+}
+function blob(x, y, z, s) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(s, 12, 8), new THREE.MeshBasicMaterial({ color: 0xc4884a, transparent: true, opacity: 0.07 }));
+  m.position.set(x, y, z); scene.add(m);
+}
+blob(-3.2, 3.4, -7, 1.3); blob(2.6, 2.6, -9, 1.6); blob(4.2, 4.2, -6, 1.1);
+
+function look(px, py, pz, lx, ly, lz) {
+  camera.position.set(px, py, pz);
+  camera.up.set(0, 1, 0);
+  camera.lookAt(lx, ly, lz);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+}
+function cam(keys, t) {
+  let a = keys[0], b = keys[keys.length - 1];
+  for (let i = 0; i < keys.length - 1; i++) if (t >= keys[i].t && t <= keys[i + 1].t) { a = keys[i]; b = keys[i + 1]; break; }
+  const u = ss((t - a.t) / Math.max(0.001, b.t - a.t));
+  const wob = Math.sin(t * 0.7) * 0.02;
+  look(lerp(a.px, b.px, u) + wob, lerp(a.py, b.py, u), lerp(a.pz, b.pz, u), lerp(a.lx, b.lx, u), lerp(a.ly, b.ly, u), lerp(a.lz, b.lz, u));
+}
+function squash(obj, landT, t) {
+  const u = t - landT;
+  if (u < 0 || u > 0.28) return;
+  const k = Math.sin((u / 0.28) * Math.PI);
+  obj.scale.y *= 1 - 0.18 * k;
+  obj.scale.x *= 1 + 0.1 * k;
+  obj.scale.z *= 1 + 0.1 * k;
+}
+
+const ev = [];
+function mark(t, type) { ev.push({ t: +t.toFixed(2), type }); }
+
+function city(t) {
+  cam([
+    { t: 0, px: 0.15, py: 9.4, pz: 14.0, lx: 0, ly: 0.2, lz: -1.5 },
+    { t: B, px: -0.2, py: 8.4, pz: 12.6, lx: 0, ly: 0.25, lz: -2 },
+  ], t);
+  const rise = 0.82 + 0.18 * seg(t, 0, 0.7);
+  for (let z = 0; z < 8; z++) for (let x = -3; x <= 3; x++) {
+    if ((x + z) % 5 === 0) continue;
+    const d = drawer('');
+    const delay = z * 0.07 + (x + 3) * 0.018;
+    const u = ss(clamp((rise * 1.7 - delay) / 0.65, 0, 1));
+    put(d, x * 0.92, -0.4 * (1 - u), -z * 1.02, 0.58);
+  }
+}
+
+function principle(t) {
+  const jump0 = B + 6.05, jump1 = B + 8.35;
+  const u = seg(t, jump0, jump1);
+  const landed = t >= jump1;
+  cam([
+    { t: B, px: 0, py: 4.9, pz: 15.0, lx: 0, ly: 0.75, lz: 0.15 },
+    { t: jump0, px: 0, py: 4.65, pz: 14.4, lx: 0.1, ly: 0.9, lz: 0.1 },
+    { t: jump0 + 1.2, px: 0.15, py: 3.85, pz: 12.4, lx: 0.55, ly: 1.4, lz: 0 },
+    { t: jump1, px: 0.28, py: 3.15, pz: 9.2, lx: 1.15, ly: 1.2, lz: 0 },
+    { t: B + 11.2, px: 0.15, py: 2.55, pz: 6.4, lx: 1.42, ly: 1.15, lz: 0 },
+    { t: C, px: 0.05, py: 2.4, pz: 5.9, lx: 1.45, ly: 1.12, lz: 0 },
+  ], t);
+  put(drawer('0'), -1.45, 0, 0);
+  put(drawer('1', t >= jump0 - 0.05), 1.45, 0, 0);
+
+  const p0 = put(person(), -1.45, 1.15, 0.18, 0.95);
+  p0.position.y = lerp(3.5, 1.15, seg(t, B + 0.30, B + 1.45));
+  squash(p0, B + 1.45, t);
+  if (p0.position.y < 1.3) shadow(-1.45, 1.36, 0.18, 0.85);
+
+  const slide = ss(clamp((t - (jump0 - 0.75)) / 0.6, 0, 1));
+  const seatX = lerp(1.45, 1.16, slide);
+  const p1 = put(person(), seatX, 1.15, 0.14, 0.95);
+  p1.position.y = lerp(3.5, 1.15, seg(t, B + 1.70, B + 2.90));
+  squash(p1, B + 2.90, t);
+  if (p1.position.y < 1.3) shadow(seatX, 1.36, 0.14, 0.85);
+
+  if (t >= B + 2.95) {
+    const p2 = put(person(), 0, 0, 1.55, 0.95);
+    if (t < jump0) {
+      p2.position.y = lerp(3.6, 0, seg(t, B + 3.05, B + 4.55));
+      squash(p2, B + 4.55, t);
+      if (p2.position.y < 0.2) shadow(0, 0.02, 1.55, 0.9);
+    } else {
+      const over = ss(clamp((u - 0.22) / 0.78, 0, 1));
+      const up = ss(clamp(u / 0.32, 0, 1));
+      const x = lerp(0, 1.74, over);
+      const z = lerp(1.55, 0.12, over);
+      const cruise = lerp(2.7, 1.15, over) + Math.sin(over * Math.PI) * 1.15;
+      const y = lerp(0, 2.7, up) * (1 - over) + cruise * over;
+      p2.position.set(x, y, z);
+      p2.rotation.z = -0.32 * Math.sin(over * Math.PI);
+      if (landed) {
+        squash(p2, jump1, t);
+        shadow(1.74, 1.36, 0.12, 0.85);
+      }
+    }
+  }
+  if (u > 0.78) {
+    glow.position.set(1.45, 1.55, 1.7);
+    glow.intensity = 6 * (landed ? 1 : ss((u - 0.78) / 0.22));
+  }
+}
+
+function proof(t) {
+  const labels = ['0', '1', '2', '3', '…', '500 000'];
+  const step = 1.45;
+  const END = (labels.length - 1) * step;
+  const fall0 = C + 16.20, fall1 = C + 18.70;
+  const u = seg(t, fall0, fall1);
+  const landed = t >= fall1;
+  cam([
+    { t: C, px: 3.4, py: 7.4, pz: 23.0, lx: 3.4, ly: 0.45, lz: 0 },
+    { t: C + 11.5, px: 3.45, py: 7.15, pz: 22.4, lx: 3.45, ly: 0.48, lz: 0 },
+    { t: C + 13.5, px: 6.15, py: 5.05, pz: 12.6, lx: 6.55, ly: 0.95, lz: 0.1 },
+    { t: fall0, px: 6.35, py: 4.15, pz: 10.4, lx: 6.95, ly: 1.15, lz: 0.05 },
+    { t: fall1 + 0.5, px: 7.2, py: 3.0, pz: 6.8, lx: END + 0.05, ly: 1.2, lz: 0 },
+    { t: DUR, px: END + 0.05, py: 2.35, pz: 5.35, lx: END + 0.05, ly: 1.22, lz: 0 },
+  ], t);
+  labels.forEach((lb, i) => {
+    const last = i === labels.length - 1;
+    const keep = last || (i === 4 && t < fall1 + 0.45);
+    const fade = t < C + 12.2 ? 1 : (keep ? 1 : clamp(1 - (t - (C + 12.2)) / 1.05, 0, 1));
+    if (fade <= 0.02) return;
+    const hotBox = last;
+    const d = put(drawer(lb, hotBox), i * step, -0.55 * (1 - fade), 0);
+    const pop = 0.9 + 0.1 * ss(clamp((t - C - i * 0.08) / 0.4, 0, 1));
+    d.scale.setScalar(pop * (0.55 + 0.45 * fade));
+  });
+  if (t > C + 11.7 && t < fall1 + 0.25) {
+    const march = ss(clamp((t - (C + 11.7)) / 2.6, 0, 1));
+    for (let i = 0; i < 15; i++) {
+      const col = i % 5, row = Math.floor(i / 5);
+      const x = END - 3.35 + col * 0.32 + march * 0.28;
+      const z = 1.85 + row * 0.34;
+      put(person(), x, 0, z, 0.32);
+      shadow(x, 0.015, z, 0.38);
+    }
+  }
+  if (t > C + 11.7) {
+  const seat = landed ? END - 0.28 : END - 0.08;
+  const onBox = put(person(), seat, 1.22, 0.12, 0.8);
+  if (landed) onBox.position.x = lerp(END - 0.08, END - 0.28, ss(clamp((t - fall1) / 0.28, 0, 1)));
+  shadow(onBox.position.x, 1.37, 0.12, 0.7);
+  const flyer = put(person(), 0, 0, 0, 0.86);
+  const waitX = END + 0.05, waitZ = 2.25;
+  if (t < fall0) {
+    flyer.position.set(waitX, 0, waitZ);
+    shadow(waitX, 0.02, waitZ, 0.75);
+  } else {
+    const x = lerp(waitX, END + 0.26, u);
+    const z = lerp(waitZ, 0.1, u);
+    const y = lerp(0, 1.22, u) + Math.sin(u * Math.PI) * 1.35;
+    flyer.position.set(x, y, z);
+    flyer.rotation.z = -0.38 * Math.sin(u * Math.PI);
+    if (landed) {
+      squash(flyer, fall1, t);
+      shadow(END + 0.26, 1.37, 0.1, 0.72);
+    }
+  }
+  if (u > 0.7) {
+    glow.position.set(END, 1.7, 1.8);
+    glow.intensity = 7 * (landed ? 1 : ss((u - 0.7) / 0.3));
+  }
+  }
+}
+
+function captions(t) {
+  let line = null;
+  for (const L of LINES) if (t >= L.t0 && t < L.t1) line = L;
+  const top = document.getElementById('top'), bot = document.getElementById('bot');
+  if (!line) { top.innerHTML = ''; bot.innerHTML = ''; return; }
+  const inn = line.t0 <= 0.02 ? 1 : clamp((t - line.t0) / 0.16, 0, 1);
+  const a = Math.min(inn, clamp((line.t1 - t) / 0.18, 0, 1));
+  top.style.opacity = a; bot.style.opacity = a;
+  top.innerHTML = line.top; bot.innerHTML = line.bot;
+}
+
+function render(t) {
+  renderer.setSize(innerWidth, innerHeight, false);
+  wipe();
+  glow.intensity = 0;
+  if (t < B) city(t);
+  else if (t < C) principle(t);
+  else proof(t);
+  captions(t);
+  renderer.render(scene, camera);
+}
+
+const face = new FontFace('Manrope', 'url(/@film/fonts/Manrope.ttf)');
+face.load().then(f => {
+  document.fonts.add(f);
+  mark(B + 1.45, 'land');
+  mark(B + 2.90, 'land');
+  mark(B + 4.55, 'land');
+  mark(B + 6.05, 'arc');
+  mark(B + 8.35, 'land');
+  mark(C + 16.20, 'arc');
+  mark(C + 18.70, 'land');
+  window.EV = ev;
+  window.DUR = DUR;
+  window.render = render;
+  window.READY = true;
+});
+</script>
+</body>
+</html>

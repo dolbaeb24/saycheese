@@ -1,21 +1,65 @@
-# SayCheese v1.0
-Take webcam shots from target just sending a malicious link
+# Конвейер объясняющих рилсов — пакет для Antigravity (Gemini)
 
-![cheese](https://user-images.githubusercontent.com/34893261/56869077-e5714d80-69d1-11e9-8ce2-29a254021890.jpg)
+Это полная копия рабочего процесса, которым сделаны ролики про Дирихле, Shazam, микроволновку и запотевшие стёкла: правила, скилы, скрипты и четыре проекта-образца. Пакет рассчитан на агентное приложение с поддержкой стандарта Agent Skills (Antigravity, Antigravity CLI и совместимые) и на модель семейства Gemini.
 
-# How it works?
-<p>The tool generates a malicious HTTPS page using Serveo or Ngrok Port Forwarding methods, and a javascript code to cam requests using MediaDevices.getUserMedia. </p>
-
-<p>The MediaDevices.getUserMedia() method prompts the user for permission to use a media input which produces a MediaStream with tracks containing the requested types of media. That stream can include, for example, a video track (produced by either a hardware or virtual video source such as a camera, video recording device, screen sharing service, and so forth), an audio track (similarly, produced by a physical or virtual audio source like a microphone, A/D converter, or the like), and possibly other track types. </p>
-
-[See more about MediaDEvices.getUserMedia() here](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia)
-<p> To convince the target to grant permissions to access the cam, the page uses a javascript code made by https://github.com/wybiral that turns the favicon into a cam stream.</p>
-
-## Installing (Kali Linux/Termux):
+## Что внутри
 
 ```
-git clone https://github.com/thelinuxchoice/saycheese
-cd saycheese
-bash saycheese
+AGENTS.md                         постоянные правила (Antigravity читает его в каждом разговоре)
+.agents/rules/
+  safe-zones.md                   безопасная зона 9:16 — всё важное в x 70–930, y 230–1480
+  explainer-craft.md              хук, «фраза = картинка», уроки удачных и провальных роликов
+  delivery-and-secrets.md         куда класть файлы, как хранить ключ, права на материалы
+.agents/skills/
+  reel-make/                      главный конвейер: тема → готовый mp4
+  reel-setup/   scripts/          установка и проверка окружения (setup.sh, doctor.sh)
+  reel-script/  references/       хук, текст, факты, раскладка по кадрам, тексты 4 роликов
+  reel-voice/   scripts/          Gemini TTS (tts_gemini.py), тайминги слов (words.py), перепроверка (asr_crop.py)
+  reel-hologram-hud/ references/  стиль «голограмма HUD» и справочник API движка
+  reel-three-table/               стиль «тёмный стол, three.js»
+  reel-sound/                     подложка, звуки событий, вентилятор, голос, приглушение
+  reel-render-qa/ scripts/        стоп-кадры, рендер, проверки (safe_sheet.py, qa.sh), выдача (deliver.sh)
+templates/                        4 готовых проекта (с голосом), из которых начинается новый ролик
 ```
 
+Сам движок рендера не копируется: это публичная библиотека [lemo-opuscar](https://github.com/lemomo-ai/lemo-opuscar) (MIT), её ставит `reel-setup`.
+
+## Установка
+
+1. **Системные инструменты.** Нужны Node 20+, ffmpeg, Python 3.11–3.13 (или `uv`) и git.
+   - macOS: `brew install node ffmpeg python@3.12 uv git`.
+   - Windows: работайте внутри WSL2 (Ubuntu) и откройте папку из WSL в Antigravity.
+   - Ubuntu: `sudo apt install ffmpeg python3-venv git`, а Node 20+ поставьте через `nvm`.
+2. **Рабочая папка.** Распакуйте архив и откройте папку `reels-pipeline-antigravity` в Antigravity как workspace. Правила из `AGENTS.md` и `.agents/rules/` подхватятся сами, скилы — из `.agents/skills/`. Проверьте это в панели Customizations: у трёх правил должен стоять режим **Always On**; если он не выставился, поставьте вручную.
+3. **Библиотека и пакеты.** В терминале рабочей папки выполните `sh .agents/skills/reel-setup/scripts/setup.sh`. Скрипт клонирует lemo-opuscar в `~/lemo-opuscar`, ставит npm-пакеты, headless Chromium, Python-окружение и faster-whisper. Первый запуск занимает несколько минут и около 1 ГБ на диске.
+4. **Ключ Gemini.** Создайте файл `~/.config/gemini.env` с одной строкой:
+
+   ```
+   GEMINI_API_KEY=ваш_ключ
+   ```
+
+   и выполните `chmod 600 ~/.config/gemini.env`. Ключ из этого чата лучше не переносить: он был отправлен открытым текстом, поэтому надёжнее выпустить новый в [Google AI Studio](https://aistudio.google.com/apikey).
+5. **Проверка.** Выполните `sh .agents/skills/reel-setup/scripts/doctor.sh`: во всех строках должно быть OK или версия, а у ключа — `present`.
+6. **Пробная сборка без озвучки.** Выполните `LIB=~/lemo-opuscar sh templates/hologram-hud-defog/build.sh`. Через 3–5 минут появится `templates/hologram-hud-defog/out/defog.mp4`, такой же, как готовый ролик.
+
+## Как пользоваться
+
+Пишите агенту так же, как раньше:
+
+- «Сделай ролик про то, почему чайник шумит перед закипанием. Стиль hologram-hud, сразу готовый» — агент возьмёт `reel-make` и пройдёт весь путь без остановок.
+- «Сделай ролик про парадокс дней рождения, согласуй со мной текст, потом сценарий, потом раскадровку» — поэтапный режим с остановками.
+- «Предложи стили для ролика про …» — 3–10 вариантов из 59 стилей библиотеки.
+
+Готовые файлы появятся в `deliverables/`: `<имя>.mp4`, `<имя>-small.mp4` (если мастер больше 15 МБ), `.srt`, постер и credits. Исходники каждого ролика лежат в `films/<имя>/`.
+
+## Что важно знать про Gemini TTS
+
+- Бесплатный тариф даёт около 10 запросов озвучки в сутки на модель. Поэтому текст озвучивается одним-четырьмя большими кусками, а не по фразе.
+- Основная модель — `gemini-3.8-flash-tts` (с управлением подачей), запасная — `gemini-2.5-flash-preview-tts` (тот же голос Kore, без указаний стиля). Скрипт сам переключается на запасную, когда основная упирается в дневной лимит.
+- Ошибки распознавания речи («рассы» вместо «росы») — не повод перегенерировать голос: сначала нужна перепроверка отрезка.
+
+## Если модель путается
+
+- Скажите: «прочитай скил reel-make и следуй ему».
+- Если файлы в `deliverables/` выходят за безопасную зону или подписи налезают друг на друга, попросите показать лист стоп-кадров с красной рамкой (`reel-render-qa`).
+- Лимит правил в Antigravity — 12 000 символов на файл; все файлы пакета в него укладываются. Свои правила добавляйте новым файлом в `.agents/rules/`.

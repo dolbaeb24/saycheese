@@ -1,0 +1,24 @@
+Дирихле — принцип ящиков
+Vertical reel, 1080×1920, 30 fps.
+
+Picture
+  Drawn in the project (Three.js). No stock footage, no logos.
+  Type: Manrope, SIL Open Font License 1.1.
+  https://github.com/sharanda/manrope
+
+Voice
+  Russian narration, voice Kore.
+  Lines 1–8: Gemini gemini-3.8-flash-tts.
+  Lines 9–10: Gemini gemini-2.5-flash-preview-tts, same voice name.
+  The daily cap on the first model was already spent, so the last two lines
+  come from the sibling model. No music library. Bed and landings are synthesized.
+
+The claim
+  Hair counts are whole numbers. This film allows 0 through 500 000 inclusive,
+  which is 500 001 pigeonholes, and says out loud that 500 000 is a generous
+  margin: a typical head is closer to 100–150 thousand. A million-person city
+  has at least 1 000 000 people, which is more than 500 001, so two share a count.
+  The proof does not name the people or the number.
+
+  A ceiling of “at most 1 000 000 hairs” would need a city of more than
+  1 000 001 people. That is why this film does not use that ceiling.
